@@ -230,3 +230,165 @@ if (nrow(pvals_lt) > 0) {
     )
 }
 print(p_lt150)
+# ============================================================
+# NTA Analysis: UC vs Microfluidic (MF)
+# Author: [Your Name]
+# Description:
+#   - Compares particle size distributions between UC and MF
+#   - Generates:
+#       1. Size distribution curves
+#       2. % particles <150 nm
+#       3. % particles >150 nm
+#   - Includes replicate-level statistics (Welch t-test)
+# ============================================================
+
+
+# -----------------------------
+# Load libraries
+# -----------------------------
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(ggpubr)
+})
+
+
+# -----------------------------
+# Set data directory
+# -----------------------------
+data_path <- "~/Desktop/NTA UC vs MF"
+
+
+# -----------------------------
+# Get all NTA files
+# -----------------------------
+files <- list.files(data_path, full.names = TRUE)
+files <- files[grepl("AllTracks", files)]
+
+if (length(files) == 0) {
+  stop("No NTA files found. Check folder path.")
+}
+
+
+# -----------------------------
+# Function: Read NTA file
+# -----------------------------
+read_nta_file <- function(file_path) {
+
+  df <- read_csv(file_path, col_names = FALSE, show_col_types = FALSE)
+
+  # Extract particle size (column 2)
+  size_values <- suppressWarnings(as.numeric(df[[2]]))
+  size_values <- size_values[!is.na(size_values)]
+
+  # Keep relevant size range
+  size_values <- size_values[size_values > 0 & size_values < 500]
+
+  # Assign group based on filename
+  group_label <- ifelse(
+    grepl("UC", basename(file_path), ignore.case = TRUE),
+    "UC",
+    "MF"
+  )
+
+  tibble(
+    Size_nm = size_values,
+    Group = group_label,
+    File = basename(file_path)
+  )
+}
+
+
+ULTRACENTRIFUGATION vs MICROFLUIDICS 
+nta_data <- map_dfr(files, read_nta_file)
+
+if (nrow(nta_data) == 0) {
+  stop("No valid particle data found after filtering.")
+}
+
+
+density_data <- nta_data %>%
+  group_by(Group) %>%
+  do({
+    d <- density(.$Size_nm, from = 0, to = 500, n = 1024)
+    tibble(x = d$x, y = d$y, Group = unique(.$Group))
+  })
+
+plot_density <- ggplot(density_data, aes(x = x, y = y, color = Group)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = c("UC" = "#8A2BE2", "MF" = "#FF0000")) +
+  scale_x_continuous(
+    limits = c(0, 500),
+    breaks = seq(0, 500, 100),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "Size Distribution",
+    x = "Particle size (nm)",
+    y = "Density (a.u.)"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank()
+  )
+
+print(plot_density)
+
+
+summary_data <- nta_data %>%
+  group_by(File, Group) %>%
+  summarise(
+    percent_lt150 = mean(Size_nm < 150) * 100,
+    percent_gt150 = mean(Size_nm > 150) * 100,
+    .groups = "drop"
+  )
+
+plot_lt150 <- ggplot(summary_data, aes(x = Group, y = percent_lt150, fill = Group)) +
+  geom_bar(stat = "summary", fun = mean, width = 0.6, color = "black") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +
+  geom_point(position = position_jitter(width = 0.03), size = 3, color = "black") +
+  scale_fill_manual(values = c("UC" = "#8A2BE2", "MF" = "#FF0000")) +
+  labs(
+    title = "% of particles <150 nm",
+    y = "Particles <150 nm (%)",
+    x = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"
+  ) +
+  stat_compare_means(
+    method = "t.test",   # Welch t-test by default
+    label = "p.signif",
+    label.y = 80
+  )
+
+print(plot_lt150)
+
+
+plot_gt150 <- ggplot(summary_data, aes(x = Group, y = percent_gt150, fill = Group)) +
+  geom_bar(stat = "summary", fun = mean, width = 0.6, color = "black") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2) +
+  geom_point(position = position_jitter(width = 0.03), size = 3, color = "black") +
+  scale_fill_manual(values = c("UC" = "#8A2BE2", "MF" = "#FF0000")) +
+  labs(
+    title = "% of particles >150 nm",
+    y = "Particles >150 nm (%)",
+    x = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"
+  ) +
+  stat_compare_means(
+    method = "t.test",
+    label = "p.signif",
+    label.y = 20
+  )
+
+print(plot_gt150)
